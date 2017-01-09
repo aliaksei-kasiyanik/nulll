@@ -38,15 +38,17 @@ static ssize_t nulll_write(struct file *file, const char __user * in, size_t siz
 	if (mutex_lock_interruptible(&lock)) {
         return -ERESTARTSYS;
 	}
-	if (filled_bytes + size >= capacity && capacity != 0) {
-		filled_bytes = capacity;
+	if (filled_bytes == capacity && capacity != 0) {
 		mutex_unlock(&lock);
 		return -ENOSPC;
-	} else {
-		filled_bytes += size;
-		mutex_unlock(&lock);
-		return size;
 	}
+	size_t write_size = size;
+	if (filled_bytes + size > capacity && capacity != 0) {
+		write_size = capacity - filled_bytes;
+	} 
+	filled_bytes += write_size;
+	mutex_unlock(&lock);
+	return write_size;
 }
 
 static long nulll_ioctl(struct file *file, unsigned int ioctl_num, unsigned long ioctl_param) {
@@ -55,11 +57,14 @@ static long nulll_ioctl(struct file *file, unsigned int ioctl_num, unsigned long
 			if (copy_to_user((void __user *) ioctl_param, (const void *) &filled_bytes, sizeof(unsigned long))) {
 				return -EFAULT;
 			}
-		// 'switch' instead of 'if' for further extending
+			break;
 		}
+		default: {
+			return -ENOTTY;
+		}
+		// 'switch' instead of 'if' for further extending
 	}
 	return 0;
-
 }
 
 static struct file_operations nulll_fops = {
@@ -78,7 +83,13 @@ static struct miscdevice nulll_misc_device = {
 };
 
 static int __init nulll_init(void) {
-	misc_register(&nulll_misc_device);
+	int ret_code = misc_register(&nulll_misc_device);
+	if (ret_code) {
+		printk(KERN_ERR
+		"=== Unable to register /DEV/NULLL device\n"); 
+		return ret_code;
+	}
+
 	mutex_init(&lock);
     printk(KERN_INFO
     "/DEV/NULLL device has been registered \n");
